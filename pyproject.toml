@@ -1,6 +1,94 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "higgs-audio"
+version = "0.1.0"
+description = "Higgs Audio V2 - A powerful audio foundation model for expressive audio generation"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Boson AI", email = "info@boson.ai"}
+]
+maintainers = [
+    {name = "Boson AI", email = "info@boson.ai"}
+]
+keywords = ["audio", "tts", "text-to-speech", "voice-cloning", "multimodal", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.45.1,<4.47.0",
+    "librosa>=0.10.0",
+    "torchaudio>=2.0.0",
+    "torchvision>=0.15.0",
+    "accelerate>=0.26.0",
+    "descript-audio-codec",
+    "dacite",
+    "boto3==1.35.36",
+    "s3fs",
+    "json_repair",
+    "pandas",
+    "pydantic",
+    "vector_quantize_pytorch",
+    "loguru",
+    "pydub",
+    "omegaconf",
+    "click",
+    "langid",
+    "jieba",
+    "tqdm",
+    "soundfile",
+    "numpy",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.12.2",
+    "pytest",
+    "pytest-cov",
+    "black",
+    "mypy",
+]
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-parser",
+]
+
+[project.urls]
+Homepage = "https://github.com/boson-ai/higgs-audio"
+Documentation = "https://github.com/boson-ai/higgs-audio"
+Repository = "https://github.com/boson-ai/higgs-audio"
+Issues = "https://github.com/boson-ai/higgs-audio/issues"
+
+[project.scripts]
+higgs-vc = "higgs_audio.cli.vc:main"
+higgs-tts = "higgs_audio.cli.tts:main"
+higgs-extract = "higgs_audio.cli.vc:main"
+higgs-generate = "higgs_audio.cli.tts:main"
+
+[tool.setuptools.packages.find]
+include = ["higgs_audio*", "boson_multimodal*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.txt", "*.yaml", "*.yml"]
 
 [tool.ruff]
 line-length = 119
@@ -65,7 +153,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-known-first-party = ["character_tuning"]
+known-first-party = ["higgs_audio", "boson_multimodal"]
 
 [tool.ruff.format]
 # Like Black, use double quotes for strings.
