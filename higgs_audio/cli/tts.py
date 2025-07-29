@@ -79,7 +79,22 @@ Examples:
         choices=["cuda", "cpu"],
         help="Device to run the model on (default: cuda)"
     )
-    
+
+    # Performance optimization parameters
+    parser.add_argument(
+        "--use_static_kv_cache",
+        action="store_true",
+        default=True,
+        help="Use static KV cache for faster generation (GPU only, default: True)"
+    )
+
+    parser.add_argument(
+        "--kv_cache_lengths",
+        type=str,
+        default="1024,4096,8192",
+        help="Comma-separated list of KV cache lengths (default: 1024,4096,8192)"
+    )
+
     # Generation parameters
     parser.add_argument(
         "--max_new_tokens",
@@ -181,12 +196,17 @@ Examples:
         os.makedirs(output_dir)
     
     try:
+        # Parse KV cache lengths
+        kv_cache_lengths = [int(x.strip()) for x in args.kv_cache_lengths.split(",")]
+
         # Initialize TTS generator
         print(f"Initializing TTS generator...")
         tts = TTSGenerator(
             model_path=args.model_path,
             audio_tokenizer_path=args.audio_tokenizer_path,
-            device=args.device
+            device=args.device,
+            use_static_kv_cache=args.use_static_kv_cache,
+            kv_cache_lengths=kv_cache_lengths
         )
         
         # Load voice profile

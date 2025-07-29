@@ -113,13 +113,6 @@ Text-to-Speech generator using voice profiles.
 - `top_k`: Top-k sampling (default: 50)
 - `seed`: Random seed (default: None)
 
-#### Performance Parameters
-
-- `use_static_kv_cache`: Use static KV cache for faster generation (default: True, GPU only)
-- `kv_cache_lengths`: List of KV cache sizes for different sequence lengths (default: [1024, 4096, 8192])
-- `ras_win_len`: RAS window length for repetition control (default: 7)
-- `ras_win_max_num_repeat`: Maximum RAS repetitions (default: 2)
-
 #### Long-form Parameters
 
 - `chunk_method`: Chunking method ("word", "speaker", or None)
@@ -184,17 +177,6 @@ higgs-tts --model_path /path/to/model \
           --text "Speaker text..." \
           --chunk_method speaker \
           --output_audio speaker_output.wav
-
-# Performance optimized generation
-higgs-tts --model_path /path/to/model \
-          --audio_tokenizer_path /path/to/tokenizer \
-          --voice_profile voice_profile.npy \
-          --text "Hello world" \
-          --output_audio output.wav \
-          --use_static_kv_cache \
-          --kv_cache_lengths "1024,4096,8192" \
-          --ras_win_len 7 \
-          --ras_win_max_num_repeat 2
 ```
 
 ## API Integration Example
@@ -246,7 +228,6 @@ result = api.generate_tts("Hello world", "user_voice", "output.wav")
 - **Voice Profile Management**: Save, load, and reuse voice profiles
 - **Command Line Interface**: Easy-to-use CLI tools
 - **Clean API**: Simple Python interface for integration
-- **Performance Optimization**: Static KV cache and multiple cache sizes for faster generation
 
 ## Requirements
 

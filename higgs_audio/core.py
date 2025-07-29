@@ -5,7 +5,7 @@ Core classes for Higgs Audio voice cloning and TTS generation.
 import os
 import numpy as np
 import torch
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List
 from pathlib import Path
 
 from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine, HiggsAudioResponse
@@ -168,7 +168,8 @@ class TTSGenerator:
     voice profiles, supporting both single-shot and long-form generation.
     """
     
-    def __init__(self, model_path: str, audio_tokenizer_path: str, device: str = "cuda"):
+    def __init__(self, model_path: str, audio_tokenizer_path: str, device: str = "cuda", 
+                 use_static_kv_cache: bool = True, kv_cache_lengths: List[int] = None):
         """
         Initialize the TTS generator.
         
@@ -176,16 +177,62 @@ class TTSGenerator:
             model_path: Path to the Higgs Audio model
             audio_tokenizer_path: Path to the Higgs Audio tokenizer
             device: Device to run the model on ('cuda' or 'cpu')
+            use_static_kv_cache: Whether to use static KV cache for faster generation (GPU only)
+            kv_cache_lengths: List of KV cache sizes for different sequence lengths
         """
         self.device = device if torch.cuda.is_available() and device == "cuda" else "cpu"
+        
+        # Set default KV cache lengths if not provided
+        if kv_cache_lengths is None:
+            kv_cache_lengths = [1024, 4096, 8192]
+        
         self.serve_engine = HiggsAudioServeEngine(
-            model_path, 
-            audio_tokenizer_path, 
-            device=self.device
+            model_path,
+            audio_tokenizer_path,
+            device=self.device,
+            kv_cache_lengths=kv_cache_lengths
         )
         self.audio_tokenizer = load_higgs_audio_tokenizer(audio_tokenizer_path, device=self.device)
         self.collator = HiggsAudioSampleCollator()
-    
+        
+        # Enable static KV cache if requested and on GPU
+        if use_static_kv_cache and "cuda" in self.device:
+            self._init_static_kv_cache()
+        else:
+            self.kv_caches = None
+
+    def _init_static_kv_cache(self):
+        """Initialize static KV cache for faster generation."""
+        from transformers.cache_utils import StaticCache
+        from copy import deepcopy
+        
+        cache_config = deepcopy(self.serve_engine._config.text_config)
+        cache_config.num_hidden_layers = self.serve_engine._config.text_config.num_hidden_layers
+        if self.serve_engine._config.audio_dual_ffn_layers:
+            cache_config.num_hidden_layers += len(self.serve_engine._config.audio_dual_ffn_layers)
+        
+        # Create KV caches for different lengths
+        self.kv_caches = {
+            length: StaticCache(
+                config=cache_config,
+                max_batch_size=1,
+                max_cache_len=length,
+                device=self.serve_engine._model.device,
+                dtype=self.serve_engine._model.dtype,
+            )
+            for length in sorted([1024, 4096, 8192])
+        }
+        
+        # Capture CUDA graphs for each KV cache length
+        if "cuda" in self.device:
+            self.serve_engine._model.capture_model(self.kv_caches.values())
+
+    def _prepare_kv_caches(self):
+        """Prepare KV caches for generation."""
+        if self.kv_caches:
+            for kv_cache in self.kv_caches.values():
+                kv_cache.reset()
+
     def generate_tts(self, text: str, voice_profile: VoiceProfile, **kwargs) -> HiggsAudioResponse:
         """
         Generate TTS audio using a voice profile (single-shot).
@@ -209,6 +256,10 @@ class TTSGenerator:
         # Create ChatMLSample
         chat_ml_sample = ChatMLSample(messages=messages)
         
+        # Prepare KV caches if using static cache
+        if self.kv_caches:
+            self._prepare_kv_caches()
+
         # Generate audio
         response = self.serve_engine.generate(
             chat_ml_sample=chat_ml_sample,
@@ -217,7 +268,10 @@ class TTSGenerator:
             top_p=kwargs.get("top_p", 0.95),
             top_k=kwargs.get("top_k", 50),
             stop_strings=["<|end_of_text|>", "<|eot_id|>"],
-            seed=kwargs.get("seed", None)
+            seed=kwargs.get("seed", None),
+            past_key_values_buckets=self.kv_caches if self.kv_caches else None,
+            ras_win_len=kwargs.get("ras_win_len", 7),
+            ras_win_max_num_repeat=kwargs.get("ras_win_max_num_repeat", 2)
         )
         
         return response
@@ -256,7 +310,11 @@ class TTSGenerator:
         context_audio_ids = [voice_audio_tokens]
         generated_audio_ids = []
         all_generated_audio = []
-        
+
+        # Prepare KV caches if using static cache
+        if self.kv_caches:
+            self._prepare_kv_caches()
+
         # Process each chunk
         for idx, chunk_text in tqdm.tqdm(
             enumerate(chunked_text), 
@@ -314,7 +372,7 @@ class TTSGenerator:
                 temperature=kwargs.get("temperature", 0.3),
                 top_k=kwargs.get("top_k", 50),
                 top_p=kwargs.get("top_p", 0.95),
-                past_key_values_buckets=self.serve_engine.kv_caches,
+                past_key_values_buckets=self.kv_caches if self.kv_caches else self.serve_engine.kv_caches,
                 ras_win_len=kwargs.get("ras_win_len", 7),
                 ras_win_max_num_repeat=kwargs.get("ras_win_max_num_repeat", 2),
                 stop_strings=["<|end_of_text|>", "<|eot_id|>"],
