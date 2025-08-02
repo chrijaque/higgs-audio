@@ -399,7 +399,7 @@ class VoiceProfileTTSGenerator:
             
             # Decode audio tokens to waveform
             decoded_audio = self.audio_tokenizer.decode(audio_out_ids)
-            chunk_audio = decoded_audio[0, 0].cpu().numpy()
+            chunk_audio = decoded_audio[0, 0].detach().cpu().numpy()
             all_generated_audio.append(chunk_audio)
             
             # Manage context buffer
@@ -417,7 +417,7 @@ class VoiceProfileTTSGenerator:
         # Create response object
         response = HiggsAudioResponse(
             audio=final_audio,
-            generated_audio_tokens=torch.concat(generated_audio_ids, dim=1).cpu().numpy(),
+            generated_audio_tokens=torch.concat(generated_audio_ids, dim=1).detach().cpu().numpy(),
             sampling_rate=24000,
             generated_text=text,
             usage={"total_chunks": len(chunked_text)}

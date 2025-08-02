@@ -27,9 +27,9 @@ class DACFile:
 
     def save(self, path):
         artifacts = {
-            "codes": self.codes.numpy().astype(np.uint16),
+            "codes": self.codes.detach().numpy().astype(np.uint16),
             "metadata": {
-                "input_db": self.input_db.numpy().astype(np.float32),
+                "input_db": self.input_db.detach().numpy().astype(np.float32),
                 "original_length": self.original_length,
                 "sample_rate": self.sample_rate,
                 "chunk_length": self.chunk_length,

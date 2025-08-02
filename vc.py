@@ -144,7 +144,7 @@ class VoiceProfileExtractor:
         voice_profile_tokens = self.audio_tokenizer.encode(audio_path)
         
         # Convert to numpy array and move to CPU
-        voice_profile_np = voice_profile_tokens.squeeze(0).cpu().numpy()
+        voice_profile_np = voice_profile_tokens.squeeze(0).detach().cpu().numpy()
         
         print(f"✅ Voice profile extracted: shape={voice_profile_np.shape}")
         
@@ -176,7 +176,7 @@ class VoiceProfileExtractor:
         voice_profile_tokens = self.audio_tokenizer.encode(audio_tensor, sample_rate)
         
         # Convert to numpy array and move to CPU
-        voice_profile_np = voice_profile_tokens.squeeze(0).cpu().numpy()
+        voice_profile_np = voice_profile_tokens.squeeze(0).detach().cpu().numpy()
         
         print(f"✅ Voice profile extracted: shape={voice_profile_np.shape}")
         

@@ -183,12 +183,12 @@ class HiggsAudioSampleCollator:
                     wv, sr = sample.get_wv(idx)  # Use idx since we want the original audio index
                     if sr != self.whisper_processor.feature_extractor.sampling_rate:
                         resampled_wv = librosa.resample(
-                            wv.cpu().numpy(),
+                            wv.detach().cpu().numpy(),
                             orig_sr=sr,
                             target_sr=self.whisper_processor.feature_extractor.sampling_rate,
                         )
                     else:
-                        resampled_wv = wv.cpu().numpy()
+                        resampled_wv = wv.detach().cpu().numpy()
                     wv = torch.tensor(resampled_wv, device=wv.device)
                     sr = self.whisper_processor.feature_extractor.sampling_rate
 
@@ -300,7 +300,7 @@ class HiggsAudioSampleCollator:
             if self.encode_whisper_embed:
                 for idx in audio_in_ids:
                     wv, sr = processed_batch[i].get_wv(idx)
-                    resampled_wv = wv.cpu().numpy()
+                    resampled_wv = wv.detach().cpu().numpy()
                     # Split long audio into chunks
                     total_samples = len(resampled_wv)
                     for chunk_start in range(0, total_samples, self.chunk_size_samples):

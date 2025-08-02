@@ -75,7 +75,7 @@ class VoiceCloner:
         
         # Encode audio to tokens
         audio_tokens = self.audio_tokenizer.encode(audio_array, sample_rate)
-        voice_tokens = audio_tokens[0, 0].cpu().numpy()
+        voice_tokens = audio_tokens[0, 0].detach().cpu().numpy()
         
         # Create metadata
         metadata = {
@@ -100,7 +100,7 @@ class VoiceCloner:
         """
         # Encode audio to tokens
         audio_tokens = self.audio_tokenizer.encode(audio_array, sample_rate)
-        voice_tokens = audio_tokens[0, 0].cpu().numpy()
+        voice_tokens = audio_tokens[0, 0].detach().cpu().numpy()
         
         # Create metadata
         metadata = {
@@ -395,7 +395,7 @@ class TTSGenerator:
             
             # Decode audio tokens to waveform
             decoded_audio = self.audio_tokenizer.decode(audio_out_ids)
-            chunk_audio = decoded_audio[0, 0].cpu().numpy()
+            chunk_audio = decoded_audio[0, 0].detach().cpu().numpy()
             all_generated_audio.append(chunk_audio)
             
             # Manage context buffer

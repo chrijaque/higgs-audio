@@ -372,7 +372,7 @@ class HiggsAudioServeEngine:
 
         with torch.no_grad():
             inputs = self._prepare_inputs(chat_ml_sample, force_audio_gen=force_audio_gen)
-            prompt_token_ids = inputs["input_ids"][0].cpu().numpy()
+            prompt_token_ids = inputs["input_ids"][0].detach().cpu().numpy()
 
             self._prepare_kv_caches()
 
@@ -403,9 +403,9 @@ class HiggsAudioServeEngine:
                 wv_numpy = None
 
             # We only support one request at a time now
-            generated_text_tokens = outputs[0][0].cpu().numpy()[len(prompt_token_ids) :]
+            generated_text_tokens = outputs[0][0].detach().cpu().numpy()[len(prompt_token_ids) :]
             generated_text = self.tokenizer.decode(generated_text_tokens)
-            generated_audio_tokens = outputs[1][0].cpu().numpy()
+            generated_audio_tokens = outputs[1][0].detach().cpu().numpy()
             return HiggsAudioResponse(
                 audio=wv_numpy,
                 generated_audio_tokens=generated_audio_tokens,
