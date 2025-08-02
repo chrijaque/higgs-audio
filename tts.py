@@ -35,6 +35,9 @@ from boson_multimodal.data_collator.higgs_audio_collator import HiggsAudioSample
 from boson_multimodal.model.higgs_audio.utils import revert_delay_pattern
 from dataclasses import asdict
 
+# Import the fixed tokenizer wrapper
+from vc import FixedHiggsAudioTokenizer
+
 
 def prepare_chunk_text(
     text, chunk_method: Optional[str] = None, chunk_max_word_num: int = 200, chunk_max_num_turns: int = 1
@@ -125,7 +128,7 @@ class VoiceProfileTTSGenerator:
             audio_tokenizer_path, 
             device=self.device
         )
-        self.audio_tokenizer = load_higgs_audio_tokenizer(audio_tokenizer_path, device=self.device)
+        self.audio_tokenizer = FixedHiggsAudioTokenizer(audio_tokenizer_path, device=self.device)
         
         # Initialize collator for long-form generation
         self.collator = HiggsAudioSampleCollator()

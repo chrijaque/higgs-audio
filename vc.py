@@ -25,6 +25,74 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from boson_multimodal.audio_processing.higgs_audio_tokenizer import load_higgs_audio_tokenizer
 
 
+class FixedHiggsAudioTokenizer:
+    """
+    Wrapper around HiggsAudioTokenizer that fixes the gradient issue in decode method.
+    This provides a safe interface that handles the bug automatically.
+    """
+    
+    def __init__(self, tokenizer_name_or_path, device="cuda"):
+        """
+        Initialize the fixed tokenizer wrapper.
+        
+        Args:
+            tokenizer_name_or_path: Path to the tokenizer
+            device: Device to run on ('cuda' or 'cpu')
+        """
+        self.tokenizer = load_higgs_audio_tokenizer(tokenizer_name_or_path, device)
+        self.device = device
+    
+    def decode(self, vq_code: torch.Tensor) -> np.ndarray:
+        """
+        Fixed decode method that properly handles gradients.
+        
+        Args:
+            vq_code: Voice profile tensor
+            
+        Returns:
+            Decoded audio as numpy array
+        """
+        # Ensure input is detached to prevent gradient issues
+        if vq_code.requires_grad:
+            vq_code = vq_code.detach()
+        
+        # Use the tokenizer's decode method (which should now be fixed)
+        try:
+            return self.tokenizer.decode(vq_code)
+        except RuntimeError as e:
+            if "grad" in str(e).lower():
+                # Fallback: manually implement the fixed decode
+                return self._manual_decode(vq_code)
+            else:
+                raise e
+    
+    def _manual_decode(self, vq_code: torch.Tensor) -> np.ndarray:
+        """
+        Manual decode implementation as fallback if the tokenizer still has issues.
+        """
+        if self.tokenizer.quantizer_type == "RVQ":
+            vq_code = vq_code.permute(1, 0, 2)
+            quantized = self.tokenizer.quantizer.decode(vq_code)
+            quantized = quantized.transpose(1, 2)
+        else:
+            vq_code = vq_code.permute(0, 2, 1)
+            quantized = self.tokenizer.quantizer.get_output_from_indices(vq_code)
+        
+        quantized_acoustic = self.tokenizer.fc_post2(quantized).transpose(1, 2)
+        o = self.tokenizer.decoder_2(quantized_acoustic)
+        
+        # Ensure proper gradient handling
+        return o.detach().cpu().numpy()
+    
+    def encode(self, audio_path_or_wv, sr=None, **kwargs):
+        """Delegate encode to the original tokenizer."""
+        return self.tokenizer.encode(audio_path_or_wv, sr, **kwargs)
+    
+    def __getattr__(self, name):
+        """Delegate all other attributes to the original tokenizer."""
+        return getattr(self.tokenizer, name)
+
+
 class VoiceProfileExtractor:
     """Extracts voice profiles from reference audio files."""
     
@@ -37,7 +105,8 @@ class VoiceProfileExtractor:
             device: Device to run the tokenizer on ('cuda' or 'cpu')
         """
         self.device = device if torch.cuda.is_available() and device == "cuda" else "cpu"
-        self.audio_tokenizer = load_higgs_audio_tokenizer(audio_tokenizer_path, device=self.device)
+        # Use the fixed tokenizer wrapper
+        self.audio_tokenizer = FixedHiggsAudioTokenizer(audio_tokenizer_path, device=self.device)
         
     def extract_voice_profile(self, audio_path: str) -> np.ndarray:
         """
