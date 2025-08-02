@@ -39,7 +39,7 @@ from dataclasses import asdict
 from vc import FixedHiggsAudioTokenizer
 
 # Import HiggsAudioModelClient from the generation script
-from examples.generation import HiggsAudioModelClient
+from examples.generation import HiggsAudioModelClient, prepare_generation_context
 
 
 def prepare_chunk_text(
@@ -730,8 +730,7 @@ class SimpleTTSGenerator:
         Returns:
             HiggsAudioResponse containing the generated audio
         """
-        # Create audio content from voice profile
-        audio_content = self.create_audio_content_from_profile(voice_profile)
+        print(f"🔍 Generating TTS with voice profile: shape={voice_profile.shape}")
         
         # Prepare messages following README pattern
         messages = []
@@ -743,8 +742,11 @@ class SimpleTTSGenerator:
         # Add user message with text
         messages.append(Message(role="user", content=text))
         
-        # Add assistant message with voice profile audio
-        messages.append(Message(role="assistant", content=audio_content))
+        # Convert voice profile to audio_ids (following official pattern)
+        voice_profile_tensor = torch.from_numpy(voice_profile).unsqueeze(0)
+        audio_ids = [voice_profile_tensor]  # <-- KEY: Pass as audio_ids!
+        
+        print(f"✅ Voice profile converted to audio_ids: shape={voice_profile_tensor.shape}")
         
         # Create ChatMLSample
         chat_ml_sample = ChatMLSample(messages=messages)
@@ -759,6 +761,8 @@ class SimpleTTSGenerator:
             stop_strings=["<|end_of_text|>", "<|eot_id|>"],
             seed=seed
         )
+        
+        print(f"✅ TTS generation completed: audio shape={response.audio.shape if response.audio is not None else 'None'}")
         
         return response
     
@@ -874,8 +878,7 @@ class OfficialTTSGenerator:
         Returns:
             HiggsAudioResponse containing the generated audio
         """
-        # Create audio content from voice profile
-        audio_content = self.create_audio_content_from_profile(voice_profile)
+        print(f"🔍 Generating TTS with voice profile: shape={voice_profile.shape}")
         
         # Prepare messages following the official pattern
         messages = []
@@ -887,17 +890,16 @@ class OfficialTTSGenerator:
         # Add user message with text
         messages.append(Message(role="user", content=text))
         
-        # Add assistant message with voice profile audio
-        messages.append(Message(role="assistant", content=audio_content))
-        
-        # Convert voice profile to audio tokens (following official pattern)
+        # Convert voice profile to audio_ids (following official pattern)
         voice_profile_tensor = torch.from_numpy(voice_profile).unsqueeze(0)
-        audio_ids = [voice_profile_tensor]
+        audio_ids = [voice_profile_tensor]  # <-- KEY: Pass as audio_ids!
         
-        # Generate using the official pattern
+        print(f"✅ Voice profile converted to audio_ids: shape={voice_profile_tensor.shape}")
+        
+        # Generate using the official pattern with audio_ids
         concat_wv, sr, text_output = self.model_client.generate(
             messages=messages,
-            audio_ids=audio_ids,
+            audio_ids=audio_ids,  # <-- CRITICAL: Voice profile tokens here!
             chunked_text=[text],  # Single chunk
             generation_chunk_buffer_size=None,
             temperature=temperature,
@@ -905,6 +907,8 @@ class OfficialTTSGenerator:
             top_p=top_p,
             seed=seed if seed else 123,
         )
+        
+        print(f"✅ TTS generation completed: audio shape={concat_wv.shape}")
         
         # Create HiggsAudioResponse following the pattern
         return HiggsAudioResponse(
@@ -964,6 +968,182 @@ class OfficialTTSGenerator:
             # Save audio
             torchaudio.save(output_path, torch.from_numpy(response.audio)[None, :], response.sampling_rate)
             print(f"✅ Audio saved to: {output_path}")
+            print(f"   - Duration: {len(response.audio) / response.sampling_rate:.2f} seconds")
+            print(f"   - Sample rate: {response.sampling_rate} Hz")
+        else:
+            print("❌ No audio generated in response")
+
+
+class VoiceCloningTTSGenerator:
+    """
+    TTS generator that properly implements voice cloning using the official pattern.
+    Uses HiggsAudioModelClient with audio_ids for true voice cloning.
+    """
+    
+    def __init__(self, model_path: str, audio_tokenizer_path: str, device: str = "cuda"):
+        """
+        Initialize voice cloning TTS generator.
+        
+        Args:
+            model_path: Path to the Higgs Audio model
+            audio_tokenizer_path: Path to the Higgs Audio tokenizer
+            device: Device to run the model on ('cuda' or 'cpu')
+        """
+        self.device = device if torch.cuda.is_available() and device == "cuda" else "cpu"
+        
+        # Load audio tokenizer first (lightweight)
+        self.audio_tokenizer = FixedHiggsAudioTokenizer(audio_tokenizer_path, device=self.device)
+        
+        # Use the official HiggsAudioModelClient pattern (supports voice cloning)
+        self.model_client = HiggsAudioModelClient(
+            model_path=model_path,
+            audio_tokenizer=self.audio_tokenizer.tokenizer,  # Use the underlying tokenizer
+            device=self.device,
+            device_id=0 if "cuda" in self.device else None,
+            max_new_tokens=2048,
+            use_static_kv_cache=True,  # Enable for better performance
+        )
+        
+        print(f"✅ Voice Cloning TTS generator initialized")
+        print(f"   - Model: {model_path}")
+        print(f"   - Device: {self.device}")
+        print(f"   - Voice cloning: ✅ Enabled")
+        print(f"   - Expected memory usage: ~24GB (as recommended)")
+    
+    def generate_tts_with_voice_profile(
+        self,
+        text: str,
+        voice_profile: np.ndarray,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: int = 1024,
+        temperature: float = 0.3,
+        top_p: float = 0.95,
+        top_k: int = 50,
+        seed: Optional[int] = None
+    ) -> HiggsAudioResponse:
+        """
+        Generate TTS audio using a voice profile (true voice cloning).
+        
+        Args:
+            text: Text to convert to speech
+            voice_profile: Voice profile as numpy array
+            system_prompt: Optional system prompt
+            max_new_tokens: Maximum number of tokens to generate
+            temperature: Temperature for generation
+            top_p: Top-p sampling parameter
+            top_k: Top-k sampling parameter
+            seed: Random seed for generation
+            
+        Returns:
+            HiggsAudioResponse containing the generated audio
+        """
+        print(f"🔍 Generating TTS with voice profile: shape={voice_profile.shape}")
+        
+        # Prepare messages following the official pattern
+        messages = []
+        
+        # Add system message if provided
+        if system_prompt:
+            messages.append(Message(role="system", content=system_prompt))
+        
+        # Add user message with text
+        messages.append(Message(role="user", content=text))
+        
+        # Convert voice profile to audio_ids (following official pattern)
+        voice_profile_tensor = torch.from_numpy(voice_profile).unsqueeze(0)
+        audio_ids = [voice_profile_tensor]  # <-- KEY: Pass as audio_ids!
+        
+        print(f"✅ Voice profile converted to audio_ids: shape={voice_profile_tensor.shape}")
+        
+        # Generate using the official pattern with audio_ids (true voice cloning)
+        concat_wv, sr, text_output = self.model_client.generate(
+            messages=messages,
+            audio_ids=audio_ids,  # <-- CRITICAL: Voice profile tokens here!
+            chunked_text=[text],  # Single chunk
+            generation_chunk_buffer_size=None,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            seed=seed if seed else 123,
+        )
+        
+        print(f"✅ Voice cloning TTS generation completed: audio shape={concat_wv.shape}")
+        
+        # Create HiggsAudioResponse following the pattern
+        return HiggsAudioResponse(
+            audio=concat_wv,
+            sampling_rate=sr,
+            generated_text=text_output,
+            generated_text_tokens=None,
+            generated_audio_tokens=None,
+            usage={
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "cached_tokens": 0,
+            },
+        )
+    
+    def generate_tts_with_voice_profile_file(
+        self,
+        text: str,
+        voice_profile_path: str,
+        system_prompt: Optional[str] = None,
+        max_new_tokens: int = 1024,
+        temperature: float = 0.3,
+        top_p: float = 0.95,
+        top_k: int = 50,
+        seed: Optional[int] = None
+    ) -> HiggsAudioResponse:
+        """
+        Generate TTS audio using a voice profile file.
+        
+        Args:
+            text: Text to convert to speech
+            voice_profile_path: Path to the voice profile file
+            system_prompt: Optional system prompt
+            max_new_tokens: Maximum number of tokens to generate
+            temperature: Temperature for generation
+            top_p: Top-p sampling parameter
+            top_k: Top-k sampling parameter
+            seed: Random seed for generation
+            
+        Returns:
+            HiggsAudioResponse containing the generated audio
+        """
+        # Load voice profile from file
+        voice_profile = np.load(voice_profile_path)
+        print(f"✅ Voice profile loaded: {voice_profile_path}, shape={voice_profile.shape}")
+        
+        # Generate TTS with the loaded voice profile
+        return self.generate_tts_with_voice_profile(
+            text=text,
+            voice_profile=voice_profile,
+            system_prompt=system_prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            seed=seed
+        )
+    
+    def save_audio_response(self, response: HiggsAudioResponse, output_path: str):
+        """
+        Save audio response to file.
+        
+        Args:
+            response: HiggsAudioResponse object
+            output_path: Path to save the audio file
+        """
+        if response.audio is not None:
+            # Create output directory if it doesn't exist
+            output_dir = os.path.dirname(output_path)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            
+            # Save audio
+            torchaudio.save(output_path, torch.from_numpy(response.audio)[None, :], response.sampling_rate)
+            print(f"✅ Voice cloning audio saved to: {output_path}")
             print(f"   - Duration: {len(response.audio) / response.sampling_rate:.2f} seconds")
             print(f"   - Sample rate: {response.sampling_rate} Hz")
         else:
