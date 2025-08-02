@@ -7,7 +7,7 @@ for later use in TTS generation. The voice profile contains the encoded audio to
 that represent the voice characteristics.
 
 Usage:
-    python voice_profile_extractor.py --ref_audio path/to/audio.wav --output_profile voice_profile.npy
+    python vc.py --ref_audio path/to/audio.wav --output_profile voice_profile.npy
 """
 
 import os
@@ -39,7 +39,9 @@ class FixedHiggsAudioTokenizer:
             tokenizer_name_or_path: Path to the tokenizer
             device: Device to run on ('cuda' or 'cpu')
         """
-        self.tokenizer = load_higgs_audio_tokenizer(tokenizer_name_or_path, device)
+        # Follow official pattern: use CPU for audio tokenizer on MPS
+        audio_tokenizer_device = "cpu" if device == "mps" else device
+        self.tokenizer = load_higgs_audio_tokenizer(tokenizer_name_or_path, device=audio_tokenizer_device)
         self.device = device
     
     def decode(self, vq_code: torch.Tensor) -> np.ndarray:
@@ -94,7 +96,7 @@ class FixedHiggsAudioTokenizer:
 
 
 class VoiceProfileExtractor:
-    """Extracts voice profiles from reference audio files."""
+    """Extracts voice profiles from reference audio files following official Higgs Audio patterns."""
     
     def __init__(self, audio_tokenizer_path: str, device: str = "cuda"):
         """
@@ -102,9 +104,24 @@ class VoiceProfileExtractor:
         
         Args:
             audio_tokenizer_path: Path to the Higgs Audio tokenizer
-            device: Device to run the tokenizer on ('cuda' or 'cpu')
+            device: Device to run the tokenizer on ('cuda', 'cpu', or 'mps')
         """
-        self.device = device if torch.cuda.is_available() and device == "cuda" else "cpu"
+        # Follow official device selection pattern
+        if device == "auto":
+            if torch.cuda.is_available():
+                self.device = "cuda"
+            elif torch.backends.mps.is_available():
+                self.device = "mps"
+            else:
+                self.device = "cpu"
+        else:
+            self.device = device
+            
+        print(f"✅ Voice Profile Extractor initialized")
+        print(f"   - Device: {self.device}")
+        print(f"   - Tokenizer: {audio_tokenizer_path}")
+        print(f"   - Memory usage: ~1GB (lightweight tokenizer only)")
+        
         # Use the fixed tokenizer wrapper
         self.audio_tokenizer = FixedHiggsAudioTokenizer(audio_tokenizer_path, device=self.device)
         
@@ -121,11 +138,15 @@ class VoiceProfileExtractor:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
             
+        print(f"🔍 Extracting voice profile from: {audio_path}")
+        
         # Encode the audio to get voice profile tokens
         voice_profile_tokens = self.audio_tokenizer.encode(audio_path)
         
         # Convert to numpy array and move to CPU
         voice_profile_np = voice_profile_tokens.squeeze(0).cpu().numpy()
+        
+        print(f"✅ Voice profile extracted: shape={voice_profile_np.shape}")
         
         return voice_profile_np
     
@@ -140,6 +161,8 @@ class VoiceProfileExtractor:
         Returns:
             Voice profile as numpy array containing encoded audio tokens
         """
+        print(f"🔍 Extracting voice profile from audio array: shape={audio_array.shape}, sr={sample_rate}")
+        
         # Convert numpy array to torch tensor
         audio_tensor = torch.from_numpy(audio_array).float()
         
@@ -154,6 +177,8 @@ class VoiceProfileExtractor:
         
         # Convert to numpy array and move to CPU
         voice_profile_np = voice_profile_tokens.squeeze(0).cpu().numpy()
+        
+        print(f"✅ Voice profile extracted: shape={voice_profile_np.shape}")
         
         return voice_profile_np
     
@@ -172,8 +197,13 @@ class VoiceProfileExtractor:
             
         # Save the voice profile
         np.save(output_path, voice_profile)
-        print(f"Voice profile saved to: {output_path}")
-        print(f"Voice profile shape: {voice_profile.shape}")
+        
+        # Calculate file size
+        file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        
+        print(f"✅ Voice profile saved to: {output_path}")
+        print(f"   - Shape: {voice_profile.shape}")
+        print(f"   - Size: {file_size_mb:.2f} MB")
         
     def load_voice_profile(self, profile_path: str) -> np.ndarray:
         """
@@ -189,6 +219,9 @@ class VoiceProfileExtractor:
             raise FileNotFoundError(f"Voice profile file not found: {profile_path}")
             
         voice_profile = np.load(profile_path)
+        print(f"✅ Voice profile loaded: {profile_path}")
+        print(f"   - Shape: {voice_profile.shape}")
+        
         return voice_profile
     
     def get_voice_profile_info(self, voice_profile: np.ndarray) -> dict:
@@ -201,7 +234,7 @@ class VoiceProfileExtractor:
         Returns:
             Dictionary containing voice profile information
         """
-        return {
+        info = {
             "shape": voice_profile.shape,
             "dtype": str(voice_profile.dtype),
             "min_value": float(voice_profile.min()),
@@ -211,6 +244,67 @@ class VoiceProfileExtractor:
             "num_codebooks": voice_profile.shape[0] if len(voice_profile.shape) > 1 else 1,
             "sequence_length": voice_profile.shape[1] if len(voice_profile.shape) > 1 else voice_profile.shape[0]
         }
+        
+        # Calculate size in MB
+        size_bytes = voice_profile.nbytes
+        info["size_mb"] = size_bytes / (1024 * 1024)
+        
+        return info
+    
+    def decode_voice_profile_to_audio(self, voice_profile: np.ndarray) -> np.ndarray:
+        """
+        Decode voice profile back to audio using only the tokenizer (lightweight).
+        
+        Args:
+            voice_profile: Voice profile as numpy array
+            
+        Returns:
+            Decoded audio as numpy array
+        """
+        print(f"🔍 Decoding voice profile to audio: shape={voice_profile.shape}")
+        
+        # Convert to tensor
+        voice_profile_tensor = torch.from_numpy(voice_profile).unsqueeze(0)
+        
+        # Use the lightweight tokenizer decode method
+        decoded_audio = self.audio_tokenizer.decode(voice_profile_tensor)
+        
+        print(f"✅ Audio decoded: shape={decoded_audio.shape}")
+        
+        return decoded_audio
+    
+    def validate_voice_profile(self, voice_profile: np.ndarray) -> bool:
+        """
+        Validate that a voice profile has the correct format.
+        
+        Args:
+            voice_profile: Voice profile as numpy array
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        # Check shape (should be 2D: [num_codebooks, sequence_length])
+        if len(voice_profile.shape) != 2:
+            print(f"❌ Invalid shape: expected 2D, got {len(voice_profile.shape)}D")
+            return False
+        
+        # Check number of codebooks (should be 8 for Higgs Audio)
+        if voice_profile.shape[0] != 8:
+            print(f"❌ Invalid codebooks: expected 8, got {voice_profile.shape[0]}")
+            return False
+        
+        # Check data type (should be integer indices)
+        if not np.issubdtype(voice_profile.dtype, np.integer):
+            print(f"❌ Invalid dtype: expected integer, got {voice_profile.dtype}")
+            return False
+        
+        # Check value range (should be 0-1023 for codebook indices)
+        if voice_profile.min() < 0 or voice_profile.max() >= 1024:
+            print(f"❌ Invalid values: expected 0-1023, got {voice_profile.min()}-{voice_profile.max()}")
+            return False
+        
+        print(f"✅ Voice profile validation passed: shape={voice_profile.shape}")
+        return True
 
 
 def main():
@@ -236,14 +330,24 @@ def main():
     parser.add_argument(
         "--device", 
         type=str, 
-        default="cuda",
-        choices=["cuda", "cpu"],
-        help="Device to run the tokenizer on"
+        default="auto",
+        choices=["auto", "cuda", "cpu", "mps"],
+        help="Device to run the tokenizer on ('auto' picks best available)"
     )
     parser.add_argument(
         "--info", 
         action="store_true",
         help="Print detailed information about the extracted voice profile"
+    )
+    parser.add_argument(
+        "--validate", 
+        action="store_true",
+        help="Validate the extracted voice profile"
+    )
+    parser.add_argument(
+        "--example", 
+        action="store_true",
+        help="Show example of how to reuse the voice profile"
     )
     
     args = parser.parse_args()
@@ -252,8 +356,13 @@ def main():
     extractor = VoiceProfileExtractor(args.audio_tokenizer, device=args.device)
     
     # Extract voice profile
-    print(f"Extracting voice profile from: {args.ref_audio}")
     voice_profile = extractor.extract_voice_profile(args.ref_audio)
+    
+    # Validate if requested
+    if args.validate:
+        if not extractor.validate_voice_profile(voice_profile):
+            print("❌ Voice profile validation failed!")
+            return 1
     
     # Save voice profile
     extractor.save_voice_profile(voice_profile, args.output_profile)
@@ -264,6 +373,116 @@ def main():
         print("\nVoice Profile Information:")
         for key, value in info.items():
             print(f"  {key}: {value}")
+    
+    # Show reuse example if requested
+    if args.example:
+        print("\n" + "="*60)
+        print("EXAMPLE: How to Reuse This Voice Profile")
+        print("="*60)
+        
+        print("\n1. Load the voice profile:")
+        print(f"   voice_profile = np.load('{args.output_profile}')")
+        
+        print("\n2. Use with TTS generation:")
+        print("   from tts import OfficialTTSGenerator")
+        print("   tts_generator = OfficialTTSGenerator(")
+        print("       model_path='bosonai/higgs-audio-v2-generation-3B-base',")
+        print("       audio_tokenizer_path='bosonai/higgs-audio-v2-tokenizer'")
+        print("   )")
+        print("   response = tts_generator.generate_tts_with_voice_profile(")
+        print("       text='Hello world',")
+        print("       voice_profile=voice_profile")
+        print("   )")
+        
+        print("\n3. Or use with command line:")
+        print(f"   python tts.py --voice_profile {args.output_profile} --text 'Hello world'")
+        
+        print("\n4. Programmatic reuse example:")
+        print("   # Load saved voice profile")
+        print(f"   loaded_profile = extractor.load_voice_profile('{args.output_profile}')")
+        print("   ")
+        print("   # Generate TTS with the same voice")
+        print("   response = tts_generator.generate_tts_with_voice_profile(")
+        print("       text='This is the same voice speaking again!',")
+        print("       voice_profile=loaded_profile")
+        print("   )")
+    
+    print(f"✅ Voice profile extraction completed successfully!")
+
+
+# Example usage functions
+def extract_and_save_voice_profile(audio_path: str, output_path: str, device: str = "auto"):
+    """
+    Extract and save a voice profile for reuse.
+    
+    Args:
+        audio_path: Path to reference audio file
+        output_path: Path to save the voice profile
+        device: Device to use ('auto', 'cuda', 'cpu', 'mps')
+    
+    Returns:
+        Path to the saved voice profile
+    """
+    print(f"🔍 Extracting voice profile from: {audio_path}")
+    
+    # Initialize extractor
+    extractor = VoiceProfileExtractor(
+        audio_tokenizer_path="bosonai/higgs-audio-v2-tokenizer",
+        device=device
+    )
+    
+    # Extract voice profile
+    voice_profile = extractor.extract_voice_profile(audio_path)
+    
+    # Validate
+    if not extractor.validate_voice_profile(voice_profile):
+        raise ValueError("Voice profile validation failed!")
+    
+    # Save for reuse
+    extractor.save_voice_profile(voice_profile, output_path)
+    
+    print(f"✅ Voice profile saved for reuse: {output_path}")
+    return output_path
+
+
+def load_and_use_voice_profile(profile_path: str, text: str, output_audio_path: str):
+    """
+    Load a saved voice profile and use it for TTS generation.
+    
+    Args:
+        profile_path: Path to the saved voice profile
+        text: Text to convert to speech
+        output_audio_path: Path to save the generated audio
+    """
+    print(f"🔍 Loading voice profile: {profile_path}")
+    
+    # Load the voice profile
+    extractor = VoiceProfileExtractor(
+        audio_tokenizer_path="bosonai/higgs-audio-v2-tokenizer",
+        device="auto"
+    )
+    
+    voice_profile = extractor.load_voice_profile(profile_path)
+    
+    # Generate TTS using the voice profile
+    from tts import OfficialTTSGenerator
+    
+    tts_generator = OfficialTTSGenerator(
+        model_path="bosonai/higgs-audio-v2-generation-3B-base",
+        audio_tokenizer_path="bosonai/higgs-audio-v2-tokenizer",
+        device="cuda"
+    )
+    
+    response = tts_generator.generate_tts_with_voice_profile(
+        text=text,
+        voice_profile=voice_profile,
+        temperature=0.3
+    )
+    
+    # Save the generated audio
+    tts_generator.save_audio_response(response, output_audio_path)
+    
+    print(f"✅ TTS generated using voice profile: {output_audio_path}")
 
 
 if __name__ == "__main__":
